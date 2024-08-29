@@ -1,0 +1,8 @@
+*.xlsx
+*.duckdb
+*.xls
+*.csv
+exports/
+sheets/
+.venv/
+__pycache__/
