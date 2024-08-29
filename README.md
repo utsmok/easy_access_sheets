@@ -4,10 +4,13 @@
     August 2024
 
 **Quickstart:**
+0. Clone this git repo to your local machine & set up python (see notes below)
 1. Select the data you want in qlik, export the data as .xlsx
-2. Put the file in folder ```.\copyright_data```
-3. Install the dependencies (see notes below for details)
-4. Run the script with ```python .\main.py```
+2. Drop the file in the folder ```.\copyright_data```
+3. Run the script with ```python .\main.py``` (or ```uv run .\main.py``` if you installed uv, as recommended)
+5. Find the processed .xlsx files  in ```.\sheets\<today's date>\```
+
+You can freely use the script on a later date to create additional output. 
 
 **Details**
 
@@ -21,8 +24,6 @@ The script also contains some basic error handling, and will ask the user to con
 If you want to dive into the source code, main.py has a few utility functions and the main function to run the script. functions.py contains all the logic for processing the data and creating the sheets. 
 
 Besides the .xlsx files, the script will also create a .duckdb file in the same folder with all the data, which can be used to produce other data exports or visualizations.
-
-
 
 ## Install / Usage
 
