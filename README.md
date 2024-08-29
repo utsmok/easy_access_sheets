@@ -4,6 +4,7 @@
     August 2024
 
 **Quickstart:**
+
 0. Clone this git repo to your local machine & set up python (see notes below)
 1. Select the data you want in qlik, export the data as .xlsx
 2. Drop the file in the folder ```.\copyright_data```
