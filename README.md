@@ -10,6 +10,7 @@
 4. Run the script with ```python .\main.py```
 
 **Details**
+
 The script will scan the ```.\exports``` folder and select the most recent file with copyRIGHT data to process, so no need for renaming or selecting a specific file.
 
 It will create a new map in folder ```.\sheets```, using the date of the processed file as the name of the map.
@@ -21,17 +22,11 @@ If you want to dive into the source code, main.py has a few utility functions an
 
 Besides the .xlsx files, the script will also create a .duckdb file in the same folder with all the data, which can be used to produce other data exports or visualizations.
 
-## Dependencies
-- duckdb
-- fastexcel
-- polars
-- pyarrow
-- rich
-- xlsxwriter
+
 
 ## Install / Usage
 
-I suggest using (uv)[https://github.com/astral-sh/uv] to manage your python install, dependencies, and virtual environments. It's quick, easy, and works on all platforms. It's great!
+I suggest using [uv](https://github.com/astral-sh/uv) to manage your python install, dependencies, and virtual environments. It's quick, easy, and works on all platforms. It's great!
 
 Installation is easy. Pick the one that fits your platform:
 
@@ -69,3 +64,11 @@ $ uv pip install -r pyproject.toml
 # run the project
 $ uv run main.py
 ```
+
+### Dependencies
+- duckdb
+- fastexcel
+- polars
+- pyarrow
+- rich
+- xlsxwriter
