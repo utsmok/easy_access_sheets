@@ -333,10 +333,7 @@ def export_sheets(sheets_path: str, duckdb_path: str|None = None, main_sheet_pat
             if faculty == "":
                 faculty = "no_faculty_found"
             sheet_name = str(faculty) + ".xlsx"
-            print(sheets_path)
-            print(faculty)
-            print(date)
-            print(sheet_name)
+
             if not date:
                 fac_folder_path = os.path.join(sheets_path, faculty)
             else:
