@@ -2,10 +2,13 @@ import duckdb
 import polars as pl
 import os
 from rich.console import Console
+import json
 
 cons = Console(emoji=True, markup=True)
 print = cons.print
 
+dept_mapping_path = os.path.join(os.path.dirname(__file__), "department_mapping.json")
+DEPARTMENT_MAPPING = json.load(open(dept_mapping_path, encoding='utf-8'))
 
 def read_data(filepath: str) -> pl.DataFrame:
     """
@@ -220,66 +223,35 @@ def add_faculty_column(df: pl.DataFrame) -> pl.DataFrame:
         The DataFrame with the faculty column added.
     """
 
-    DEPARTMENT_MAPPING: dict[str, str] = {
-        "M-ME: Mechanical Engineering": "ET",
-        "M-TM: Technical Medicine": "TNW",
-        "M-EE: Electrical Engineering": "EEMCS",
-        "B-COM: Communication Science": "BMS",
-        "M-ES: European Studies": "BMS",
-        "M-CS: Computer Science": "EEMCS",
-        "M-CSE: Chemical Science & Engineering": "TNW",
-        "M-PSY: Psychology": "BMS",
-        "M-ITECH: Interaction Technology": "EEMCS",
-        "M-ROB: Robotics": "EEMCS",
-        "M-BIT: Business Information Technology": "EEMCS",
-        "M-IEM: Industrial Engineering and Management": "BMS",
-        "M-AM: Applied Mathematics": "EEMCS",
-        "M-EEM: Environmental and Energy Management": "BMS",
-        "B-AT: Advanced Technology": "TNW",
-        "M-BME: Biomedical Engineering": "TNW",
-        "M-NT: Nanotechnology": "TNW",
-        "M-CEM: Civil Engineering and Management": "ET",
-        "BMS: Behavioural, Management and Social Sciences": "BMS",
-        "B-AM: Applied Mathematics": "EEMCS",
-        "M-AP: Applied Physics": "TNW",
-        "M-GEO-WO: Geo-information Science and Earth Observation": "ITC",
-        "B-CSE: Chemical Engineering": "TNW",
-        "B-ATLAS: Technology and Liberal Arts & Sciences": "ITC",
-        "M-EMSYS: Embedded Systems": "EEMCS",
-        "M-IDE: Industrial Design Engineering": "ET",
-        "B-PSY: Psychology": "BMS",
-        "M-EST: Educational Science and Technology": "BMS",
-        "B-EE: Electrical Engineering": "EEMCS",
-        "M-PSTS: Philosophy of Science, Technology and Society": "BMS",
-        "Master Risicomanagement": "",
-        "EEMCS: Electrical Engineering, Mathematics and Computer Science": "EEMCS",
-        "M-CME: Construction Management and Engineering": "ET",
-        "M-BA: Business Administration": "BMS",
-        "M-SE: Spatial Engineering": "ITC",
-        "B-TCS: Technical Computer Science": "EEMCS",
-        "B-CREA: Creative Technology": "EEMCS",
-        "B-CE: Civil Engineering": "ET",
-        "B-TG: Technische Geneeskunde": "TNW",
-        "B-IBA: International Business Administration": "BMS",
-        "B-BMT: Biomedische Technologie": "TNW",
-        "B-GZW: Gezondheidswetenschappen": "TNW",
-        "B-MST: Management, Society and Technology": "BMS",
-        "B-IEM: Industrial Engineering and Management": "BMS",
-        "B-IDE: Industrial Design Engineering": "ET",
-        "B-BIT: Business Information Technology": "EEMCS",
-        "B-ME: Mechanical Engineering": "ET",
-        "B-TN: Technische Natuurkunde": "TNW",
-        "M-COM: Communication Science": "BMS",
-        "B-ME-VU: Mechanical Engineering - Amsterdam (VU-UT)": "ET",
-        "Testcourses": "",
-        "M-SET: Sustainable Energy Technology": "ET",
-    }
+
 
     return df.with_columns(
         faculty=pl.col("department").replace_strict(
             DEPARTMENT_MAPPING, default="Unmapped"
         )
     )
+
+def add_status_columns(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    add the 'status' and 'status_info' columns to the dataframe.
+    These should be used by the faculties to indicate the status of each item.
+    'status' is initially set to 'not checked', and 'status_info' is set to '-'.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The DataFrame to add the status columns to.
+
+    Returns
+    -------
+    pl.DataFrame
+        The DataFrame with the status columns added.
+    """
+
+    return df.with_columns([
+        pl.lit('not checked').alias('status'),
+        pl.lit('-').alias('status_info')
+    ])
 
 
 def process_data(filepath: str, periods: tuple[str, str] | list[str], dbpath: str):
@@ -322,8 +294,13 @@ def process_data(filepath: str, periods: tuple[str, str] | list[str], dbpath: st
         path=dbpath,
     )
 
+def export_single_sheet(duckdb_path: str, sheets_path: str) -> None:
+    """
+    Same as export_sheets, but only exports a single sheet with all data.
+    """
+    export_sheets(duckdb_path, sheets_path, all_faculties=False)
 
-def export_sheets(duckdb_path: str, sheets_path: str):
+def export_sheets(sheets_path: str, duckdb_path: str|None = None, main_sheet_path: str|None = None, all_faculties: bool = True, date: str|None = None) -> None:
     """
     Read in a duckdb file and a path to store the output.
     Then create a sheet for each faculty, and one with all data, and store it in that new map.
@@ -335,27 +312,63 @@ def export_sheets(duckdb_path: str, sheets_path: str):
     sheets_path : str
         The path to the folder where the sheets should be stored.
     """
-    with duckdb.connect(database=duckdb_path, read_only=True) as con:
-        df: pl.DataFrame = con.execute("SELECT * FROM easy_access").pl()
+    if duckdb_path:
+        with duckdb.connect(database=duckdb_path, read_only=True) as con:
+            df: pl.DataFrame = con.execute("SELECT * FROM easy_access").pl()
+    elif main_sheet_path:
+        df = pl.read_excel(main_sheet_path, raise_if_empty=True)
 
-    faculties = df.select(pl.col("faculty").unique())
-    faculties = faculties.to_series().to_list()
+    if all_faculties:
+        df = add_status_columns(df)
+        faculties = df.select(pl.col("faculty").unique())
+        faculties = faculties.to_series().to_list()
 
-    for faculty in faculties:
-        df_faculty = df.filter(pl.col("faculty") == faculty)
-        if faculty == "":
-            faculty = "no_faculty_found"
-        sheet_name = str(faculty) + ".xlsx"
-        fac_sheet_path = os.path.join(sheets_path, sheet_name)
+        for faculty in faculties:
+            if faculty is None:
+                faculty = "no_faculty_found"
+                df_faculty = df.filter(pl.col("faculty").is_null())
+            else:
+                df_faculty = df.filter(pl.col("faculty") == faculty)
+
+            if faculty == "":
+                faculty = "no_faculty_found"
+            sheet_name = str(faculty) + ".xlsx"
+            print(sheets_path)
+            print(faculty)
+            print(date)
+            print(sheet_name)
+            if not date:
+                fac_folder_path = os.path.join(sheets_path, faculty)
+            else:
+                fac_folder_path = os.path.join(sheets_path, faculty, date)
+            # check if path exists, if not, create it
+            if not os.path.exists(fac_folder_path):
+                os.makedirs(fac_folder_path, exist_ok=True)
+
+            fac_sheet_path = os.path.join(fac_folder_path, sheet_name)
+            df_faculty.write_excel(fac_sheet_path)
+            print(
+                f":floppy_disk: saved [cyan]{faculty}[/cyan] data to :clipboard: [magenta]{fac_sheet_path}[/magenta]"
+            )
+
+    # check if sheets_path\all.xlsx exists. If it does, raise error.
+    sheet_name = 'all.xlsx'
+    if date:
+        all_folder_path = os.path.join(sheets_path, 'all', date)
+    else:
+        all_folder_path = os.path.join(sheets_path, 'all')
+
+    if not os.path.exists(all_folder_path):
+        os.makedirs(all_folder_path, exist_ok=True)
+    all_sheet_path = os.path.join(all_folder_path, sheet_name)
+
+    if os.path.exists(all_sheet_path):
+        raise ValueError(f"File {all_sheet_path} already exists. Please delete it or rename it before running this script again.")
+    else:
+        df.write_excel(all_sheet_path)
         print(
-            f":floppy_disk: saved [cyan]{faculty}[/cyan] data to :clipboard: [magenta]{fac_sheet_path}[/magenta]"
+            f':floppy_disk: saved the [cyan]full list[/cyan] to :clipboard: [magenta]{all_sheet_path}[/magenta]'
         )
-        df_faculty.write_excel(fac_sheet_path)
-
-    df.write_excel(os.path.join(sheets_path, "all.xlsx"))
-    print(
-        f':floppy_disk: saved the [cyan]full list[/cyan] to :clipboard: [magenta]{os.path.join(sheets_path, "all.xlsx")}[/magenta]'
-    )
 
 
 if __name__ == "__main__":
