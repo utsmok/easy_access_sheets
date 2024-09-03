@@ -3,6 +3,12 @@
     s.mok@utwente.nl
     August 2024
 
+
+# NOTE!
+
+This readme is a work in progress. The current script already works differently -- we moved to living worksheets.
+Documentation will be updated in the future.
+
 # Basic usage
 
 To set up the script, you'll first need to download the contents of this repository to your local machine. git is recommended of course.

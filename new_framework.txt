@@ -1,0 +1,57 @@
+
+A new implementation is proposed to use more structured SQL to keep track of all items and do comparisons and updates using duckdb.
+Some additional notes on the usage of duckdb vs excel sheets:
+---------------------
+    Instead of using all the separate excel sheets as the main archive, use a duckdb sql database to hold the data. Keep the excel sheets for easy viewing; but use the duckdb archive for comparisons and creating new sheets and such.
+    the primary duckdb sql archive should be 1 file containing all the data -- so include all columns from the excel sheets when adding to the db.
+    Use different tables inside this db where needed.
+
+    If an item is updated, move the current row to the 'old_versions' table, and add a new row with the updated data.
+    Add a foreign key relation to the created row in 'previous_version' in the new row in the column 'previous_version'.
+    Make sure this foreign key relation remains intact when the item is updated again.
+
+    Beside the columns in the copyRIGHT data, we will add columns 'retrieved_from_qlik', 'last_modified', 'previous_version', 'faculty', 'workflow_status', 'workflow_remarks' to each item.
+    retrieved_from_qlik should be the date of the qlik export file from the copyRIGHT tool.
+    last_modified should be the date of the last modification to the item in the database.
+    old_versions is a many2manyfield with the ids of all the previous versions of the item.
+
+    Also, the duckdb table 'final_data' will be created, and will contain all the data from the excel sheets. These sheets will contain the same columns and rows as the archive, but the 'workflow_status' and 'workflow_remarks' columns will be filled by the faculties. This final table will eventually be used to update Qlik again.
+---------------------
+
+
+The framework will be based on the class/functions below. These descriptions are not complete, but should give you an idea of what's required.
+Note that each row will be identified using an unique id in column 'material_id'.
+
+class CopyRightData
+description: Class to import data from a Qlik export .xlsx file. Does processing, cleaning, adding standard columns. Final result is a polars dataframe.
+Parameters: qlik_export_file (path to the Qlik export file)
+Methods:
+to_df: imports data from the Qlik export file into a Polars dataframe
+clean: cleans and preprocesses the imported data
+process: adds the extra columns (e.g. faculty, workflow_status, workflow_remarks, ...), checks for errors, adds 'retrieved_from_qlik' date, etc
+
+class Archive
+description: Take in the results from the DataImporter, and use it to update the duckdb archive. If it doesn't exist, create it.
+Parameters: archive_path (path to the archive directory)
+Methods:
+add: takes in a dataframe from the DataImporter, and adds any rows not currently in the archive. If no archive exists, create it.
+Make sure to check all the fields with dates like 'last_modified' and 'retrieved_from_qlik' are correct. If rows already exist, ignore them (keep the old ones).
+update: update existing rows in the archive with new data. Make sure to handle old_versions column correctly, as well as all other dates.
+get: get specific data from the archive
+
+class Sheet
+description: Manipulate/read/write/copy/compare/update a single worksheet.
+Parameters: worksheet_path (path to the worksheet file)
+Methods:
+update: Takes the worksheet, compares the data to what's in duckdb for this faculty (or 'all' if it's the main worksheet), and updates the worksheet with the new data.
+compare: for each row, get the differences between the current worksheet and the same rows in the archive
+retrieve: read in the data from the sheet and update the duckdb table 'final_data' with it.
+
+class EasyAccess
+description: Main class to handle the entire workflow.
+parameters: none (?)
+methods:
+process_new_data: grabs the latest CopyRightData, uses this to updat the Archive, and then updates all Sheets.
+
+
+
