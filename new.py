@@ -6,23 +6,173 @@ import datetime
 import uuid
 import os
 import json
+import pathlib
+import shutil
+
 print = Console(emoji=True, markup=True).print
 dotenv.load_dotenv('settings.env')
+
+class Directory:
+    '''
+    Simple class for directories + operations.
+    Init with an absolute path, or a path relative to the current working directory.
+    If the dir does not yet exist, it will be created. Disable this by setting the 'create_dir' parameter to False.
+    '''
+    def __init__(self, path: str, create_dir: bool = True):
+        self.input_path_str = path
+        self.create_dir = create_dir
+
+        # check if the path is absolute
+        if pathlib.Path(path).is_absolute():
+            self.full = pathlib.Path(path)
+        else:
+            self.full = pathlib.Path.cwd() / path
+
+        self.post_init()
+
+    def post_init(self) -> None:
+        '''
+        Checks to see if this is actually a dir,
+        or create it if create_dir is set to True.
+        '''
+        if not self.full.exists():
+            if self.create_dir:
+                self.create()
+            else:
+                raise FileNotFoundError(f"Directory {self.full} does not exist and create_dir is set to False.")
+        if not self.full.is_dir():
+            raise NotADirectoryError(f"Directory {self.full} is not a directory.")
+
+    def files(self) -> list['File']:
+        '''
+        Returns all files in the dir as a list of File objects.
+        '''
+        return [File(self, file) for file in self.full.iterdir() if file.is_file()]
+
+    def dirs(self, r: bool = False) -> list['Directory']:
+        '''
+        Returns a list of all dirs in this Directory as a list of Directory objects.
+        If r is set to True, it will return all children dirs recursively.
+        '''
+        if not r:
+            return [Directory(self, d) for d in self.full.iterdir() if d.is_dir()]
+        if r:
+            return [Directory(self, d) for d in self.full.rglob('*') if d.is_dir()]
+
+    def exists(self) -> bool:
+        return self.full.exists()
+
+    def is_dir(self) -> bool:
+        return self.full.is_dir()
+
+    def create(self) -> None:
+        try:
+            self.full.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            pass
+
+    def __eq__(self, other) -> bool:
+        return self.full == other.full
+
+    def __str__(self):
+        return str(self.full)
+
+    def __repr__(self):
+        return f"DirPath('{self.input_path_str}') -> {self.full}"
+
+class File:
+    '''
+    Simple class for files + operations
+    Parameters:
+        path: str or Path
+            relative from the current working directory.
+            OR
+            absolute path to the file.
+            Should always end with the filename including extension.
+    '''
+    def __init__(self, path: str|pathlib.Path):
+
+        self.path_init_str = str(path)
+
+        assert isinstance(path, str) or isinstance(path, pathlib.Path)
+
+        if isinstance(path, pathlib.Path):
+            self.path = path
+            self.name = path.name
+            self.extension = path.suffix
+            self.dir = Directory(str(self.path.absolute().parent))
+        elif isinstance(path, str):
+            if '/' in path:
+                self.name = path.rsplit('/',1)[-1]
+            else:
+                self.name = path
+
+            assert '.' in self.name
+            assert '/' not in self.name
+
+            self.extension = self.name.split('.')[-1]
+            self.dir = Directory(path.rsplit('/', 1)[0], create_dir=True)
+            self.path = self.dir.full / self.name
+
+
+    def move(self, new_dir: str) -> None:
+        new_dir: Directory = Directory(new_dir, create_dir=True)
+        self.path.rename(new_dir.full / self.name)
+
+    def rename(self, new_name: str) -> None:
+        self.path.rename(self.dir.full / new_name)
+
+    def copy(self, new_path: str) -> None:
+        if '.' in new_path:
+            # includes file name
+            copy_name = new_path.rsplit('/', 1)[-1]
+            copy_dir = Directory(new_path.rsplit('/', 1)[0], create_dir=True)
+        else:
+            # no file name, so use the same name
+            copy_name = self.name
+            copy_dir = Directory(new_path, create_dir=True)
+
+        source = self.path
+        destination = copy_dir.full / copy_name
+        shutil.copy(source, destination)
+
+    def created(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self.path.stat().st_birthtime)
+
+    def modified(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self.path.stat().st_mtime)
+
+    def exists(self) -> bool:
+        return self.path.exists()
+
+    def is_file(self) -> bool:
+        return self.path.is_file()
+
+    def __eq__(self, other) -> bool:
+        return self.path == other.path
+
+    def __str__(self) -> str:
+        return str(self.path)
+
+    def __repr__(self) -> str:
+        return f"File('{self.path_init_str}') -> {self.path}"
+
 class Sheet:
     """
     Manipulate/read/write/copy/compare/update a single worksheet.
     """
 
-    def __init__(self, worksheet_path: str, sheet_type: str):
+    def __init__(self, worksheet_file: File, sheet_type: str):
         """
         Initialize the class with the path to the worksheet file.
         sheet_type should be 'all' or one of the faculty abbreviations (e.g. 'TNW', 'ITC', etc).
         """
-        self.path: str = worksheet_path
+        self.file = worksheet_file
+        self.path = worksheet_file.path
         try:
             self.current_sheet_data: pl.DataFrame = pl.read_excel(self.path, raise_if_empty=True)
         except FileNotFoundError:
-            print(f"File {worksheet_path} does not exist. Creating a new one.")
+            print(f"File {worksheet_file} does not exist. Creating a new one.")
             self.current_sheet_data = pl.DataFrame()
         self.archive: Archive = Archive()
         self.sheet_type: str = sheet_type
@@ -79,11 +229,9 @@ class Sheet:
             return
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         unique_id = uuid.uuid1()
-        backup_path = self.path.replace(".xlsx", f"_backup_{today}_{unique_id}.xlsx")
-        if not self.current_sheet_data.is_empty():
-            self.current_sheet_data.write_excel(backup_path)
-            if not os.path.exists(backup_path):
-                raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
+        backup_path = self.path.rename(f"{self.path.stem}_backup_{today}_{unique_id}.xlsx")
+        if not backup_path.exists():
+            raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
         self.new_sheet_data.write_excel(self.path)
 
     def store_final_data(self) -> None:
@@ -93,12 +241,19 @@ class Sheet:
         self.archive.store_final_data(self.current_sheet_data)
 
 class CopyRightData:
-    def __init__(self, qlik_export_file: str, dept_mapping_path: str = ''):
-        self.qlik_export_file = qlik_export_file
-        if dept_mapping_path == '':
-            dept_mapping_path = os.path.join(os.path.dirname(__file__), "department_mapping.json")
+    def __init__(self, qlik_export_file: str | File, dept_mapping_path: str | File | None = None):
 
-        self.DEPARTMENT_MAPPING = json.load(open(dept_mapping_path, encoding='utf-8'))
+        if isinstance(qlik_export_file, str):
+            self.qlik_export_file = File(qlik_export_file)
+        else:
+            self.qlik_export_file = qlik_export_file
+
+        if not dept_mapping_path:
+            dept_mapping_path = File("department_mapping.json")
+        if isinstance(dept_mapping_path, str):
+            dept_mapping_path = File(dept_mapping_path)
+
+        self.DEPARTMENT_MAPPING = json.load(open(dept_mapping_path.path, encoding='utf-8'))
         self.data = self.to_df()
         self.data = self.clean()
         self.data = self.add_faculty_column()
@@ -110,7 +265,7 @@ class CopyRightData:
         """
         imports data from the Qlik export file into a Polars dataframe
         """
-        return pl.read_excel(self.qlik_export_file)
+        return pl.read_excel(self.qlik_export_file.path)
 
     def clean(self) -> pl.DataFrame:
         """
@@ -134,9 +289,7 @@ class CopyRightData:
         """
         adds the extra columns (e.g. faculty, workflow_status, workflow_remarks, ...), checks for errors, adds 'retrieved_from_qlik' date, etc
         """
-        qlik_file_created_date: float = os.path.getctime(self.qlik_export_file)
-        # date: from float format to YYYY-MM-DD format
-        qlik_file_created_date = datetime.datetime.fromtimestamp(qlik_file_created_date).strftime("%Y-%m-%d")
+        qlik_file_created_date: str = self.qlik_export_file.created().strftime("%Y-%m-%d")
         return self.data.with_columns(
             pl.Series("retrieved_from_qlik", [qlik_file_created_date] * len(self.data)),
             pl.Series("workflow_status", ["not checked"] * len(self.data)),
@@ -148,13 +301,16 @@ class CopyRightData:
 
 
 class Archive:
-    def __init__(self, db_path: str|None = None):
+    def __init__(self, db_path: str|File|None = None):
         if not db_path:
-            self.db_path = os.getenv("DUCKDB_PATH")
+            self.db_path = File(os.getenv("DUCKDB_PATH"))
             if not self.db_path:
                 raise ValueError("No database path provided and no DUCKDB_PATH environment variable found.")
         else:
-            self.db_path = db_path
+            if isinstance(db_path, str):
+                self.db_path = File(db_path)
+            else:
+                self.db_path = db_path
         #self.print_archive_columns()
 
 
@@ -234,9 +390,9 @@ class EasyAccess:
     def __init__(self):
         self.archive = Archive()
 
-        self.copyright_data_dir = os.getenv("QLIK_EXPORTS_DIR")
-        self.faculty_sheet_dir = os.getenv("FACULTY_SHEETS_DIR")
-        self.cip_worksheet_path = os.path.join(os.getenv("CIP_WORKSHEET_DIR"), "all.xlsx")
+        self.copyright_data_dir = Directory(os.getenv("QLIK_EXPORTS_DIR"))
+        self.faculty_sheet_dir = Directory(os.getenv("FACULTY_SHEETS_DIR"))
+        self.cip_worksheet_path = File(os.path.join(os.getenv("CIP_WORKSHEET_DIR"), "all.xlsx"))
         self.copyright_data, self.previous_copyright_data = self.get_latest_export()
         self.sheets: list[Sheet] = []
 
@@ -245,9 +401,9 @@ class EasyAccess:
         Scan all files in self.copyright_data_dir and return the 2 latest ones.
         Use the created date to determine which file to return.
         """
-        all_files = os.listdir(self.copyright_data_dir)
-        latest_file = max([os.path.join(self.copyright_data_dir, file) for file in all_files], key=os.path.getctime)
-        previous_file = max([os.path.join(self.copyright_data_dir, file) for file in all_files if os.path.join(self.copyright_data_dir, file) != latest_file], key=os.path.getctime)
+        all_files = self.copyright_data_dir.files()
+        latest_file = max(all_files, key=lambda x: x.created())
+        previous_file = max(all_files, key=lambda x: x.created(), default=latest_file)
         return CopyRightData(qlik_export_file=latest_file), CopyRightData(qlik_export_file=previous_file)
 
     def run(self) -> None:
@@ -257,9 +413,10 @@ class EasyAccess:
             faculties = self.list_faculties(all_data)
 
             self.create_faculty_sheets(faculties)
-            all_sheet=Sheet(worksheet_path=self.cip_worksheet_path, sheet_type='all')
+            all_sheet=Sheet(worksheet_file=self.cip_worksheet_path, sheet_type='all')
             all_sheet.update()
             self.sheets.append(all_sheet)
+
     def create_faculty_sheets(self, faculties: list[str]) -> None:
         """
         Create a sheet for each faculty in the faculties list.
@@ -273,7 +430,7 @@ class EasyAccess:
             fac_sheet_path = os.path.join(os.getcwd(), self.faculty_sheet_dir, sheet_name)
 
 
-            sheet = Sheet(worksheet_path=fac_sheet_path, sheet_type=faculty)
+            sheet = Sheet(worksheet_file=fac_sheet_path, sheet_type=faculty)
             sheet.update()
             self.sheets.append(sheet)
 
