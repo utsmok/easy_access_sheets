@@ -8,6 +8,7 @@ import os
 import json
 import pathlib
 import shutil
+import ibis
 
 print = Console(emoji=True, markup=True).print
 dotenv.load_dotenv('settings.env')
@@ -47,7 +48,7 @@ class Directory:
         '''
         Returns all files in the dir as a list of File objects.
         '''
-        return [File(self, file) for file in self.full.iterdir() if file.is_file()]
+        return [File(self.full / file) for file in self.full.iterdir() if file.is_file()]
 
     def dirs(self, r: bool = False) -> list['Directory']:
         '''
@@ -101,17 +102,16 @@ class File:
             self.name = path.name
             self.extension = path.suffix
             self.dir = Directory(str(self.path.absolute().parent))
+
         elif isinstance(path, str):
             if '/' in path:
                 self.name = path.rsplit('/',1)[-1]
+                self.dir = Directory(path.rsplit('/', 1)[0], create_dir=True)
             else:
                 self.name = path
-
-            assert '.' in self.name
-            assert '/' not in self.name
+                self.dir = Directory(os.getcwd())
 
             self.extension = self.name.split('.')[-1]
-            self.dir = Directory(path.rsplit('/', 1)[0], create_dir=True)
             self.path = self.dir.full / self.name
 
 
@@ -185,7 +185,7 @@ class Sheet:
         if self.sheet_type == 'all':
             archive_items = self.archive.get()
         else:
-            archive_items = self.archive.get(search_terms=[('faculty',f"'{str(self.sheet_type)}'")])
+            archive_items = self.archive.get(search_terms=[('faculty',str(self.sheet_type))])
 
         if self.current_sheet_data.is_empty():
             new_items = archive_items
@@ -229,9 +229,10 @@ class Sheet:
             return
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         unique_id = uuid.uuid1()
-        backup_path = self.path.rename(f"{self.path.stem}_backup_{today}_{unique_id}.xlsx")
-        if not backup_path.exists():
-            raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
+        if self.path.exists():
+            backup_path = self.path.replace(f"{self.path.parent / self.path.stem}_backup_{today}_{unique_id}.xlsx")
+            if not backup_path.exists():
+                raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
         self.new_sheet_data.write_excel(self.path)
 
     def store_final_data(self) -> None:
@@ -285,6 +286,7 @@ class CopyRightData:
                 self.DEPARTMENT_MAPPING, default="Unmapped"
             )
         )
+    
     def process(self) -> pl.DataFrame:
         """
         adds the extra columns (e.g. faculty, workflow_status, workflow_remarks, ...), checks for errors, adds 'retrieved_from_qlik' date, etc
@@ -299,8 +301,13 @@ class CopyRightData:
     def store(self) -> None:
         self.archive.add(self.data)
 
-
 class Archive:
+    '''
+    This class handles all duckdb interactions.
+    It stores the archive of all the data.
+    Currently this is just a list of the qlik data as it was initially imported.
+    
+    '''
     def __init__(self, db_path: str|File|None = None):
         if not db_path:
             self.db_path = File(os.getenv("DUCKDB_PATH"))
@@ -311,12 +318,18 @@ class Archive:
                 self.db_path = File(db_path)
             else:
                 self.db_path = db_path
+        self.con =  ibis.connect(f'duckdb://{self.db_path.name}')
+        if 'archive' in self.con.list_tables():
+            self.archive = self.con.table('archive')
+        else:
+            self.archive = None
+        
         #self.print_archive_columns()
 
-
     def print_archive_columns(self) -> None:
-        with duckdb.connect(database=self.db_path, read_only=True) as con:
-            print(con.execute("SELECT * FROM archive").pl().glimpse())
+        ibis.options.interactive = True
+        print(self.archive.head())
+        ibis.options.interactive = False
 
     def add(self, df: pl.DataFrame):
         '''
@@ -327,21 +340,22 @@ class Archive:
 
         # first check the df for errors
         df = self.check_dataframe(df)
-        with duckdb.connect(database=self.db_path, read_only=False) as con:
-            # if archive doesn't exist, create it
-            if not con.execute("""SELECT name FROM sqlite_master WHERE type='table' AND name='archive';""").fetchall():
-                con.execute(f"""
+        if self.archive is None:
+            with duckdb.connect(database='archive.duckdb', read_only=False) as con:
+                con.execute("""
                     CREATE TABLE 'archive' AS SELECT * FROM df;
                     """)
+            self.archive = self.con.table('archive')
+        else:
+            # if archive exists, add only rows which are not already in the archive
+            # check this by comparing the material_id column
+            existing_material_ids = self.archive.select('material_id').to_polars()
+            new_material_ids = df.filter(~df['material_id'].is_in(existing_material_ids['material_id']))
+            if not new_material_ids.is_empty():
+                new_material_ids = ibis.memtable(new_material_ids)
+                self.archive = self.archive.union(new_material_ids)
             else:
-                # if archive exists, add only rows which are not already in the archive
-                # check this by comparing the material_id column
-                existing_material_ids = con.execute("SELECT material_id FROM archive").pl()
-                new_material_ids = df.filter(~df['material_id'].is_in(existing_material_ids['material_id']))
-                if not new_material_ids.is_empty():
-                    con.execute("INSERT INTO archive SELECT * FROM new_material_ids")
-                else:
-                    print(f"No new rows to add to the archive.")
+                print("No new rows to add to the archive.")
 
     def store_final_data(self, df: pl.DataFrame) -> None:
         '''
@@ -360,13 +374,17 @@ class Archive:
         if search_terms is None, return all rows
         '''
 
-        with duckdb.connect(database=self.db_path, read_only=True) as con:
-            if search_terms is None:
-                return con.execute("SELECT * FROM archive").pl()
-            else:
-                #TODO: test this!!
-                return con.execute(f"SELECT * FROM archive WHERE {' AND '.join([f'{key} = {value}' for key, value in search_terms])}").pl()
-
+        if search_terms is None:
+            return self.archive.to_polars()
+        else:
+            #TODO: test this!!
+            # return all rows from self.archive where all conditions in the search terms are met
+            # search terms are a list of tuples, where the first element is the column name, and the second element is the value to match
+            # e.g. [('material_id', '12345'), ('workflow_status', 'not checked')]
+            filtered = self.archive
+            for key, value in search_terms:
+                filtered = filtered.filter(filtered[key] == value)
+            return filtered.to_polars()
     def check_dataframe(self, df: pl.DataFrame) -> pl.DataFrame:
         '''
         check a dataframe for errors & see if it has the correct columns
@@ -408,13 +426,18 @@ class EasyAccess:
 
     def run(self) -> None:
         for data in [self.previous_copyright_data, self.copyright_data]:
+            print('calling data.store()')
             data.store()
+            print('calling self.archive.get()')
             all_data = self.archive.get()
+            print('calling self.list_faculties()')
             faculties = self.list_faculties(all_data)
-
+            print('calling self.create_faculty_sheets()')
             self.create_faculty_sheets(faculties)
+            print('calling Sheet().update()')
             all_sheet=Sheet(worksheet_file=self.cip_worksheet_path, sheet_type='all')
             all_sheet.update()
+            print('appending all_sheet to self.sheets')
             self.sheets.append(all_sheet)
 
     def create_faculty_sheets(self, faculties: list[str]) -> None:
@@ -427,7 +450,7 @@ class EasyAccess:
             elif faculty == "":
                 faculty = "no_faculty_found"
             sheet_name = str(faculty) + ".xlsx"
-            fac_sheet_path = os.path.join(os.getcwd(), self.faculty_sheet_dir, sheet_name)
+            fac_sheet_path = File(os.path.join(self.faculty_sheet_dir.full, sheet_name))
 
 
             sheet = Sheet(worksheet_file=fac_sheet_path, sheet_type=faculty)
@@ -445,5 +468,8 @@ class EasyAccess:
         return faculties
 
 if __name__ == "__main__":
+    c = duckdb.connect(database='archive.duckdb', read_only=False)
+    c.close()
+
     easy_access = EasyAccess()
     easy_access.run()
