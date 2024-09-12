@@ -119,7 +119,7 @@ class CopyRightData:
     @property
     def data(self) -> pl.DataFrame:
         return self._data
-    
+
     def to_df(self) -> pl.DataFrame:
         """
         imports data from the Qlik export file into a Polars dataframe
@@ -146,26 +146,28 @@ class CopyRightData:
                 self.DEPARTMENT_MAPPING, default="Unmapped"
             )
         )
-    
+
     def process(self) -> pl.DataFrame:
         """
-        adds the extra columns (e.g. faculty, workflow_status, workflow_remarks, ...), checks for errors, adds 'retrieved_from_qlik' date, etc
+        adds the extra columns (e.g. faculty, workflow_status) & adds 'retrieved_from_qlik' date
         """
         qlik_file_created_date: str = self.qlik_export_file.created().strftime("%Y-%m-%d")
         return self._data.with_columns(
             pl.Series("retrieved_from_qlik", [qlik_file_created_date] * len(self._data)),
             pl.Series("workflow_status", ["not checked"] * len(self._data)),
-            pl.Series("workflow_remarks", ["-"] * len(self._data)),
+            # put remarks in the already existing 'remarks' column
+            # no need for a new column
+            #pl.Series("workflow_remarks", ["-"] * len(self._data)),
         )
 
-    
+
 
 class Archive:
     '''
     This class handles  duckdb interactions.
     It stores the archive of  the data.
     Currently this is just a list of the qlik data as it was initially imported.
-    
+
     '''
     def __init__(self, db_path: str|File|None = None):
         self.item_history_key_columns = ['classification', 'ml_prediction', 'manual_classification', 'last_change', 'status']
@@ -184,12 +186,12 @@ class Archive:
             self.archive = self.con.table('archive')
         else:
             self.archive = None
-        
+
         if 'item_history' in self.con.list_tables():
             self.item_history = self.con.table('item_history')
         else:
             self.item_history = None
-        
+
         if 'current' in self.con.list_tables():
             self.current = self.con.table('current')
         else:
@@ -202,7 +204,7 @@ class Archive:
             'current' table (all rows as currently shown in qlik),
             'item_history' table (a log of all rows as they were exported from qlik, so we can keep track of changes),
             'archive' table (1 row per material_id with the status as they were first imported).
-        
+
         '''
         df = self.check_dataframe(data._data)
         self.update_current(df)
@@ -214,7 +216,7 @@ class Archive:
         takes in a dataframe with CopyRightData, and does the following:
         - for each existing material_id, update key columns (classification, ml_prediction, manual_classification, last_change, status) with the new values
         - for each new material_id, insert a new row into the  table
-        
+
         '''
 
         # first check the df for errors
@@ -259,10 +261,10 @@ class Archive:
                 con.execute("CREATE OR REPLACE TEMP TABLE new_data AS SELECT * FROM df")
                 con.execute("""
                     INSERT INTO item_history
-                    SELECT * 
+                    SELECT *
                     FROM new_data
                     WHERE NOT EXISTS (
-                        SELECT 1 
+                        SELECT 1
                         FROM item_history
                         WHERE item_history.material_id = new_data.material_id
                         AND item_history.classification = new_data.classification
@@ -280,7 +282,7 @@ class Archive:
         If no archive exists, create it using the df.
         If an archive exists, add only rows which are not already in the archive.
         If no df is provided, use the item_history table to update the archive.
-        
+
         If rows already exist, ignore them (keep the old ones).
         '''
         with duckdb.connect(database='archive.duckdb', read_only=False) as con:
@@ -294,10 +296,10 @@ class Archive:
                     con.execute("CREATE OR REPLACE TEMP TABLE new_data AS SELECT * FROM df")
                     con.execute("""
                         INSERT INTO archive
-                        SELECT new_data.* 
+                        SELECT new_data.*
                         FROM new_data
                         WHERE NOT EXISTS (
-                            SELECT 1 
+                            SELECT 1
                             FROM archive
                             WHERE archive.material_id = new_data.material_id
                         )
@@ -307,7 +309,7 @@ class Archive:
             else:
                 con.execute("""
                     INSERT INTO archive
-                    SELECT 
+                    SELECT
                         ih.*
                     FROM item_history ih
                     INNER JOIN (
@@ -316,7 +318,7 @@ class Archive:
                         WHERE material_id NOT IN (SELECT material_id FROM archive)
                         GROUP BY material_id
                     ) AS earliest_entries
-                    ON ih.material_id = earliest_entries.material_id 
+                    ON ih.material_id = earliest_entries.material_id
                     AND ih.retrieved_from_qlik = earliest_entries.min_retrieved_date
                     WHERE NOT EXISTS (
                         SELECT 1 FROM archive a
@@ -324,7 +326,7 @@ class Archive:
                     )
                 """)
                 self.archive = self.con.table('archive')
-                
+
     def store_final_data(self, df: pl.DataFrame) -> None:
         '''
         Store the data from the worksheet in the final_data table in the duckdb archive.
@@ -356,7 +358,7 @@ class Archive:
             for key, value in search_terms:
                 filtered = filtered.filter(filtered[key] == value)
             return filtered.to_polars()
-        
+
     def check_dataframe(self, df: pl.DataFrame) -> pl.DataFrame:
         '''
         check a dataframe for errors & see if it has the correct columns
