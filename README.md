@@ -9,6 +9,39 @@
 This readme is a work in progress. The current script already works differently -- we moved to living worksheets.
 Documentation will be updated in the future.
 
+Current process description:
+
+
+Er wordt 1x per week(?) een nieuwe batch sheets gemaakt op basis van een export uit de tool. Gebruikte filters voor de export:
+Alle periodes voor het lopende academisch jaar -> dus nu alles wat begint met 2024-
+Classification == 'lange overname'
+Deze export wordt in een specifieke Teams-map opgeslagen.
+Een script wordt daarna gedraaid die automatisch de nieuwste export inleest en de data klaar maakt:
+Voor iedere rij wordt aan de hand van de 'Department' waarde (de opleiding) opgezocht bij welke faculteit dit item hoort. Dit wordt toegevoegd in de kolom 'Faculty'.
+Voor iedere rij wordt een kolom toegevoegd genaamd 'Workflow Status', die de faculteit zal aanpassen om de voortgang te laten weten. Deze staat standaard op 'To Do'. De andere opties zijn 'Done' en 'In Progress'. Evt. toelichting of details kunnen in het veld 'Remarks'. Deze categorie is dan in ieder geval gelijk aan de indeling in CopyRIGHT zelf, die ook 'done', 'todo' en 'in progress' als filteropties aan geeft. Dit wordt gedaan door de waardes van meerdere kolommen te bekijken – er is geen losse 'status' kolom. Lijkt mij handiger om die gewoon toe te voegen als losse kolom voor ons zelf.
+Ook wordt aan iedere rij een kolom toegevoegd 'retrieved_from_copyRIGHT_on' die de datum van deze copyRIGHT export bevat. Dit
+de kolomnamen worden gestandaardiseerd voor makkelijkere dataverwerking: zoals spaties vervangen door underscores en alles in kleine letters; de * (voor vermenigvuldigen) vervangen met een x; en # vervangen door count.
+Optionele/geschrapte stap: Het 'CIP' doet alvast een check op items. Het script exporteert hiervoor 1 grote Excel-file met alle items, verwerkt zoals in stap 3 beschreven. CIP voegt alvast classificaties toe voor alle items. Dit wordt dan gebruikt als de brondata voor de volgende stap.
+Daarna zal het script voor iedere faculteit een losse sheet produceren met alle nieuwe of aangepaste items die zijn gevonden in deze batch.
+Het script leest dus eerst alle bestaande sheets van de faculteit in (als ze er al zijn) vanuit de Teams-omgeving. Iedere faculteit heeft een folder waar alle sheets in staan en waar alleen die faculteit toegang toe heeft (en wij natuurlijk).
+Selecteer de nieuwe items, dat wil zeggen:
+alle items met material_ids die nog niet in de huidige sheets staan
+alle items die wel al in de sheets zitten, maar in de CopyRIGHT tool een nieuwe waarde heeft in de kolom 'last change': dan is er iets veranderd in een van de kolommen. Het is dan wel handig om iets toe te voegen aan deze rijen dat ze al eerder in de sheets hebben gestaan, ik zal nog even bedenken wat handig is. Ik verwacht dat dit weinig voorkomt en/of weinig impact heeft.
+Maak een nieuw excel-bestand met de datum van de export in de naam, bv TNW_12_11_2024.xlsx. Deze heeft meerdere sheets.
+Sheet 1 bevat alle items met alleen de essentiele kolommen voor de checks. Dat zijn:
+eerst: url, workflow_status, manual classification, scope, remarks
+dit zijn de 'interactieve' velden: de faculteit kan/moet hier dingen invullen, en de url is natuurlijk het meest belangrijk om het item te openen.
+dan: ml prediction, material id, title, owner, author, department, course name
+Dit zijn de belangrijkste gegevens die helpen een besluit te nemen.
+Sheet 2 bevat alle kolommen voor alle items. Dit kan gebruikt worden als naslag. Deze sheet staat op 'alleen-lezen' zodat altijd duidelijk is wat het start-punt was.
+Sheet 3 bevat wat lijstjes met mogelijkheden voor verschillende velden zoals 'workflow status', 'manual classification', en 'scope', zodat in die kolommen alleen die specifieke waardes ingevuld kunnen worden.
+Evt: sheet met overzichten/statistieken, maar dat kunnen we beter los houden hiervan denk ik.
+De faculteit heeft automatisch toegang tot de sheets, en kan aan de slag.
+Wij kunnen in feite op ieder moment weer de data uitlezen uit deze sheets. Daar is een tweede scriptje voor die door alle beschikbare faculteits-sheets loopt en alle 'done' gemarkeerde items overneemt, de kolomnamen weer terugvertaalt naar de originelen, en de data vluchtig valideert (bv: de manuele classificatie moet altijd correct ingevuld zijn).
+Deze 'importsheet' kan dan doorgestuurd worden naar Surf zodat het kan worden ingelezen.
+
+
+
 # Basic usage
 
 To set up the script, you'll first need to download the contents of this repository to your local machine. git is recommended of course.
