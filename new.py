@@ -6,156 +6,12 @@ import datetime
 import uuid
 import os
 import json
-import pathlib
-import shutil
+import ibis
+
+from file_utils import Directory, File
 
 print = Console(emoji=True, markup=True).print
 dotenv.load_dotenv('settings.env')
-
-class Directory:
-    '''
-    Simple class for directories + operations.
-    Init with an absolute path, or a path relative to the current working directory.
-    If the dir does not yet exist, it will be created. Disable this by setting the 'create_dir' parameter to False.
-    '''
-    def __init__(self, path: str, create_dir: bool = True):
-        self.input_path_str = path
-        self.create_dir = create_dir
-
-        # check if the path is absolute
-        if pathlib.Path(path).is_absolute():
-            self.full = pathlib.Path(path)
-        else:
-            self.full = pathlib.Path.cwd() / path
-
-        self.post_init()
-
-    def post_init(self) -> None:
-        '''
-        Checks to see if this is actually a dir,
-        or create it if create_dir is set to True.
-        '''
-        if not self.full.exists():
-            if self.create_dir:
-                self.create()
-            else:
-                raise FileNotFoundError(f"Directory {self.full} does not exist and create_dir is set to False.")
-        if not self.full.is_dir():
-            raise NotADirectoryError(f"Directory {self.full} is not a directory.")
-
-    def files(self) -> list['File']:
-        '''
-        Returns all files in the dir as a list of File objects.
-        '''
-        return [File(self, file) for file in self.full.iterdir() if file.is_file()]
-
-    def dirs(self, r: bool = False) -> list['Directory']:
-        '''
-        Returns a list of all dirs in this Directory as a list of Directory objects.
-        If r is set to True, it will return all children dirs recursively.
-        '''
-        if not r:
-            return [Directory(self, d) for d in self.full.iterdir() if d.is_dir()]
-        if r:
-            return [Directory(self, d) for d in self.full.rglob('*') if d.is_dir()]
-
-    def exists(self) -> bool:
-        return self.full.exists()
-
-    def is_dir(self) -> bool:
-        return self.full.is_dir()
-
-    def create(self) -> None:
-        try:
-            self.full.mkdir(parents=True, exist_ok=False)
-        except FileExistsError:
-            pass
-
-    def __eq__(self, other) -> bool:
-        return self.full == other.full
-
-    def __str__(self):
-        return str(self.full)
-
-    def __repr__(self):
-        return f"DirPath('{self.input_path_str}') -> {self.full}"
-
-class File:
-    '''
-    Simple class for files + operations
-    Parameters:
-        path: str or Path
-            relative from the current working directory.
-            OR
-            absolute path to the file.
-            Should always end with the filename including extension.
-    '''
-    def __init__(self, path: str|pathlib.Path):
-
-        self.path_init_str = str(path)
-
-        assert isinstance(path, str) or isinstance(path, pathlib.Path)
-
-        if isinstance(path, pathlib.Path):
-            self.path = path
-            self.name = path.name
-            self.extension = path.suffix
-            self.dir = Directory(str(self.path.absolute().parent))
-        elif isinstance(path, str):
-            if '/' in path:
-                self.name = path.rsplit('/',1)[-1]
-            else:
-                self.name = path
-
-            assert '.' in self.name
-            assert '/' not in self.name
-
-            self.extension = self.name.split('.')[-1]
-            self.dir = Directory(path.rsplit('/', 1)[0], create_dir=True)
-            self.path = self.dir.full / self.name
-
-
-    def move(self, new_dir: str) -> None:
-        new_dir: Directory = Directory(new_dir, create_dir=True)
-        self.path.rename(new_dir.full / self.name)
-
-    def rename(self, new_name: str) -> None:
-        self.path.rename(self.dir.full / new_name)
-
-    def copy(self, new_path: str) -> None:
-        if '.' in new_path:
-            # includes file name
-            copy_name = new_path.rsplit('/', 1)[-1]
-            copy_dir = Directory(new_path.rsplit('/', 1)[0], create_dir=True)
-        else:
-            # no file name, so use the same name
-            copy_name = self.name
-            copy_dir = Directory(new_path, create_dir=True)
-
-        source = self.path
-        destination = copy_dir.full / copy_name
-        shutil.copy(source, destination)
-
-    def created(self) -> datetime.datetime:
-        return datetime.datetime.fromtimestamp(self.path.stat().st_birthtime)
-
-    def modified(self) -> datetime.datetime:
-        return datetime.datetime.fromtimestamp(self.path.stat().st_mtime)
-
-    def exists(self) -> bool:
-        return self.path.exists()
-
-    def is_file(self) -> bool:
-        return self.path.is_file()
-
-    def __eq__(self, other) -> bool:
-        return self.path == other.path
-
-    def __str__(self) -> str:
-        return str(self.path)
-
-    def __repr__(self) -> str:
-        return f"File('{self.path_init_str}') -> {self.path}"
 
 class Sheet:
     """
@@ -185,7 +41,7 @@ class Sheet:
         if self.sheet_type == 'all':
             archive_items = self.archive.get()
         else:
-            archive_items = self.archive.get(search_terms=[('faculty',f"'{str(self.sheet_type)}'")])
+            archive_items = self.archive.get(search_terms=[('faculty',str(self.sheet_type))])
 
         if self.current_sheet_data.is_empty():
             new_items = archive_items
@@ -229,9 +85,10 @@ class Sheet:
             return
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         unique_id = uuid.uuid1()
-        backup_path = self.path.rename(f"{self.path.stem}_backup_{today}_{unique_id}.xlsx")
-        if not backup_path.exists():
-            raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
+        if self.path.exists():
+            backup_path = self.path.replace(f"{self.path.parent / self.path.stem}_backup_{today}_{unique_id}.xlsx")
+            if not backup_path.exists():
+                raise ValueError(f"Backup was not made, stopping script. Please check that the backup file {backup_path} exists.")
         self.new_sheet_data.write_excel(self.path)
 
     def store_final_data(self) -> None:
@@ -254,25 +111,29 @@ class CopyRightData:
             dept_mapping_path = File(dept_mapping_path)
 
         self.DEPARTMENT_MAPPING = json.load(open(dept_mapping_path.path, encoding='utf-8'))
-        self.data = self.to_df()
-        self.data = self.clean()
-        self.data = self.add_faculty_column()
-        self.data = self.process()
-        self.archive = Archive()
+        self._data = self.to_df()
+        self._data = self.clean()
+        self._data = self.add_faculty_column()
+        self._data = self.process()
 
-
+    @property
+    def data(self) -> pl.DataFrame:
+        return self._data
+    
     def to_df(self) -> pl.DataFrame:
         """
         imports data from the Qlik export file into a Polars dataframe
         """
-        return pl.read_excel(self.qlik_export_file.path)
+        if not self._data:
+            return pl.read_excel(self.qlik_export_file.path)
+        else:
+            return self._data
 
     def clean(self) -> pl.DataFrame:
         """
         cleans and preprocesses the imported data
         """
-
-        return self.data.rename(
+        return self._data.rename(
             lambda col: col.replace(" ", "_")
             .replace("#", "count_")
             .replace("*", "x")
@@ -280,28 +141,35 @@ class CopyRightData:
             )
 
     def add_faculty_column(self) -> pl.DataFrame:
-        return self.data.with_columns(
+        return self._data.with_columns(
             faculty=pl.col("department").replace_strict(
                 self.DEPARTMENT_MAPPING, default="Unmapped"
             )
         )
+    
     def process(self) -> pl.DataFrame:
         """
         adds the extra columns (e.g. faculty, workflow_status, workflow_remarks, ...), checks for errors, adds 'retrieved_from_qlik' date, etc
         """
         qlik_file_created_date: str = self.qlik_export_file.created().strftime("%Y-%m-%d")
-        return self.data.with_columns(
-            pl.Series("retrieved_from_qlik", [qlik_file_created_date] * len(self.data)),
-            pl.Series("workflow_status", ["not checked"] * len(self.data)),
-            pl.Series("workflow_remarks", ["-"] * len(self.data)),
+        return self._data.with_columns(
+            pl.Series("retrieved_from_qlik", [qlik_file_created_date] * len(self._data)),
+            pl.Series("workflow_status", ["not checked"] * len(self._data)),
+            pl.Series("workflow_remarks", ["-"] * len(self._data)),
         )
 
-    def store(self) -> None:
-        self.archive.add(self.data)
-
+    
 
 class Archive:
+    '''
+    This class handles  duckdb interactions.
+    It stores the archive of  the data.
+    Currently this is just a list of the qlik data as it was initially imported.
+    
+    '''
     def __init__(self, db_path: str|File|None = None):
+        self.item_history_key_columns = ['classification', 'ml_prediction', 'manual_classification', 'last_change', 'status']
+
         if not db_path:
             self.db_path = File(os.getenv("DUCKDB_PATH"))
             if not self.db_path:
@@ -311,62 +179,184 @@ class Archive:
                 self.db_path = File(db_path)
             else:
                 self.db_path = db_path
-        #self.print_archive_columns()
+        self.con =  ibis.connect(f'duckdb://{self.db_path.name}')
+        if 'archive' in self.con.list_tables():
+            self.archive = self.con.table('archive')
+        else:
+            self.archive = None
+        
+        if 'item_history' in self.con.list_tables():
+            self.item_history = self.con.table('item_history')
+        else:
+            self.item_history = None
+        
+        if 'current' in self.con.list_tables():
+            self.current = self.con.table('current')
+        else:
+            self.current = None
 
-
-    def print_archive_columns(self) -> None:
-        with duckdb.connect(database=self.db_path, read_only=True) as con:
-            print(con.execute("SELECT * FROM archive").pl().glimpse())
-
-    def add(self, df: pl.DataFrame):
+    def update(self, data: CopyRightData):
         '''
-        takes in a dataframe from the DataImporter, and adds any rows not currently in the archive. If no archive exists, create it.
-        Make sure to check all the fields with dates like 'last_modified' and 'retrieved_from_qlik' are correct.
-        If rows already exist, ignore them (keep the old ones).
+        Ingest a new CopyRightData export file into the archive.
+        Will update:
+            'current' table (all rows as currently shown in qlik),
+            'item_history' table (a log of all rows as they were exported from qlik, so we can keep track of changes),
+            'archive' table (1 row per material_id with the status as they were first imported).
+        
+        '''
+        df = self.check_dataframe(data._data)
+        self.update_current(df)
+        self.update_item_history(df)
+        self.update_archive()
+
+    def update_current(self, df: pl.DataFrame):
+        '''
+        takes in a dataframe with CopyRightData, and does the following:
+        - for each existing material_id, update key columns (classification, ml_prediction, manual_classification, last_change, status) with the new values
+        - for each new material_id, insert a new row into the  table
+        
         '''
 
         # first check the df for errors
-        df = self.check_dataframe(df)
-        with duckdb.connect(database=self.db_path, read_only=False) as con:
-            # if archive doesn't exist, create it
-            if not con.execute("""SELECT name FROM sqlite_master WHERE type='table' AND name='archive';""").fetchall():
-                con.execute(f"""
-                    CREATE TABLE 'archive' AS SELECT * FROM df;
+        with duckdb.connect(database='archive.duckdb', read_only=False) as con:
+            if self.current is None:
+                con.execute("""
+                    CREATE TABLE 'current' AS SELECT * FROM df;
                     """)
+                self.current = self.con.table('current')
             else:
-                # if archive exists, add only rows which are not already in the archive
-                # check this by comparing the material_id column
-                existing_material_ids = con.execute("SELECT material_id FROM archive").pl()
-                new_material_ids = df.filter(~df['material_id'].is_in(existing_material_ids['material_id']))
-                if not new_material_ids.is_empty():
-                    con.execute("INSERT INTO archive SELECT * FROM new_material_ids")
-                else:
-                    print(f"No new rows to add to the archive.")
+                con.execute("CREATE OR REPLACE TEMP TABLE new_data AS SELECT * FROM df")
+                con.execute("""
+                    MERGE INTO current AS target
+                    USING new_data AS source
+                    ON target.material_id = source.material_id
+                    WHEN MATCHED AND (
+                        target.classification != source.classification OR
+                        target.ml_prediction != source.ml_prediction OR
+                        target.manual_classification != source.manual_classification OR
+                        target.last_change != source.last_change OR
+                        target.status != source.status
+                    ) THEN
+                        UPDATE SET
+                            classification = source.classification,
+                            ml_prediction = source.ml_prediction,
+                            manual_classification = source.manual_classification,
+                            last_change = source.last_change,
+                            status = source.status
+                    WHEN NOT MATCHED THEN
+                        INSERT VALUES (source.*)
+                """)
+                self.current = self.con.table('current')
 
+    def update_item_history(self, df: pl.DataFrame):
+        with duckdb.connect(database=self.db_path, read_only=False) as con:
+            if self.item_history is None:
+                con.execute("""
+                    CREATE TABLE 'item_history' AS SELECT * FROM df;
+                    """)
+                self.item_history = self.con.table('current')
+            else:
+                con.execute("CREATE OR REPLACE TEMP TABLE new_data AS SELECT * FROM df")
+                con.execute("""
+                    INSERT INTO item_history
+                    SELECT * 
+                    FROM new_data
+                    WHERE NOT EXISTS (
+                        SELECT 1 
+                        FROM item_history
+                        WHERE item_history.material_id = new_data.material_id
+                        AND item_history.classification = new_data.classification
+                        AND item_history.ml_prediction = new_data.ml_prediction
+                        AND item_history.manual_classification = new_data.manual_classification
+                        AND item_history.last_change = new_data.last_change
+                        AND item_history.status = new_data.status
+                    )
+                """)
+                self.item_history = self.con.table('item_history')
+
+
+    def update_archive(self, df: pl.DataFrame | None = None):
+        '''
+        If no archive exists, create it using the df.
+        If an archive exists, add only rows which are not already in the archive.
+        If no df is provided, use the item_history table to update the archive.
+        
+        If rows already exist, ignore them (keep the old ones).
+        '''
+        with duckdb.connect(database='archive.duckdb', read_only=False) as con:
+            if df is not None:
+                if self.archive is None:
+                    con.execute("""
+                        CREATE TABLE 'archive' AS SELECT * FROM df;
+                        """)
+                    self.archive = self.con.table('archive')
+                else:
+                    con.execute("CREATE OR REPLACE TEMP TABLE new_data AS SELECT * FROM df")
+                    con.execute("""
+                        INSERT INTO archive
+                        SELECT new_data.* 
+                        FROM new_data
+                        WHERE NOT EXISTS (
+                            SELECT 1 
+                            FROM archive
+                            WHERE archive.material_id = new_data.material_id
+                        )
+                    """)
+
+                    self.archive = self.con.table('archive')
+            else:
+                con.execute("""
+                    INSERT INTO archive
+                    SELECT 
+                        ih.*
+                    FROM item_history ih
+                    INNER JOIN (
+                        SELECT material_id, MIN(retrieved_from_qlik) as min_retrieved_date
+                        FROM item_history
+                        WHERE material_id NOT IN (SELECT material_id FROM archive)
+                        GROUP BY material_id
+                    ) AS earliest_entries
+                    ON ih.material_id = earliest_entries.material_id 
+                    AND ih.retrieved_from_qlik = earliest_entries.min_retrieved_date
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM archive a
+                        WHERE a.material_id = ih.material_id
+                    )
+                """)
+                self.archive = self.con.table('archive')
+                
     def store_final_data(self, df: pl.DataFrame) -> None:
         '''
         Store the data from the worksheet in the final_data table in the duckdb archive.
         '''
 
-    def update(self, df: pl.DataFrame):
-        '''
-        update existing rows in the archive with new data from qlik or worksheets. Make sure to handle old_versions column correctly, as well as all other dates.
-        '''
 
-    def get(self, search_terms: list[tuple[str, str]]|None = None) -> pl.DataFrame:
+    def get(self, data: str = 'archive', search_terms: list[tuple[str, str]]|None = None) -> pl.DataFrame:
         '''
-        get specific rows from the archive
+        get specific rows from an archive table
+        data should be one of 'archive', 'current', or 'item_history' -- i.e. the name of the table to get data from
         search_terms should be a list with dictionaries with shape {'field_name': 'value'}
         if search_terms is None, return all rows
         '''
+        if data == 'archive':
+            table = self.archive
+        elif data == 'current':
+            table = self.current
+        elif data == 'item_history':
+            table = self.item_history
 
-        with duckdb.connect(database=self.db_path, read_only=True) as con:
-            if search_terms is None:
-                return con.execute("SELECT * FROM archive").pl()
-            else:
-                #TODO: test this!!
-                return con.execute(f"SELECT * FROM archive WHERE {' AND '.join([f'{key} = {value}' for key, value in search_terms])}").pl()
-
+        if search_terms is None:
+            return table.to_polars()
+        else:
+            #TODO: test this!!
+            # return all rows from self.archive where all conditions in the search terms are met
+            # search terms are a list of tuples, where the first element is the column name, and the second element is the value to match
+            # e.g. [('material_id', '12345'), ('workflow_status', 'not checked')]
+            filtered = table
+            for key, value in search_terms:
+                filtered = filtered.filter(filtered[key] == value)
+            return filtered.to_polars()
+        
     def check_dataframe(self, df: pl.DataFrame) -> pl.DataFrame:
         '''
         check a dataframe for errors & see if it has the correct columns
@@ -401,20 +391,25 @@ class EasyAccess:
         Scan all files in self.copyright_data_dir and return the 2 latest ones.
         Use the created date to determine which file to return.
         """
-        all_files = self.copyright_data_dir.files()
+        all_files = self.copyright_data_dir.files
         latest_file = max(all_files, key=lambda x: x.created())
         previous_file = max(all_files, key=lambda x: x.created(), default=latest_file)
         return CopyRightData(qlik_export_file=latest_file), CopyRightData(qlik_export_file=previous_file)
 
     def run(self) -> None:
         for data in [self.previous_copyright_data, self.copyright_data]:
-            data.store()
-            all_data = self.archive.get()
+            print('storing data in archive')
+            self.archive.update(data)
+            print('calling self.archive.get()')
+            all_data = self.archive.get(data='archive', search_terms=None)
+            print('calling self.list_faculties()')
             faculties = self.list_faculties(all_data)
-
+            print('calling self.create_faculty_sheets()')
             self.create_faculty_sheets(faculties)
+            print('calling Sheet().update()')
             all_sheet=Sheet(worksheet_file=self.cip_worksheet_path, sheet_type='all')
             all_sheet.update()
+            print('appending all_sheet to self.sheets')
             self.sheets.append(all_sheet)
 
     def create_faculty_sheets(self, faculties: list[str]) -> None:
@@ -427,7 +422,7 @@ class EasyAccess:
             elif faculty == "":
                 faculty = "no_faculty_found"
             sheet_name = str(faculty) + ".xlsx"
-            fac_sheet_path = os.path.join(os.getcwd(), self.faculty_sheet_dir, sheet_name)
+            fac_sheet_path = File(os.path.join(self.faculty_sheet_dir.full, sheet_name))
 
 
             sheet = Sheet(worksheet_file=fac_sheet_path, sheet_type=faculty)
@@ -445,5 +440,8 @@ class EasyAccess:
         return faculties
 
 if __name__ == "__main__":
+    c = duckdb.connect(database='archive.duckdb', read_only=False)
+    c.close()
+
     easy_access = EasyAccess()
     easy_access.run()
