@@ -27,14 +27,13 @@ Het script leest dus eerst alle bestaande sheets van de faculteit in (als ze er 
 Selecteer de nieuwe items, dat wil zeggen:
 alle items met material_ids die nog niet in de huidige sheets staan
 alle items die wel al in de sheets zitten, maar in de CopyRIGHT tool een nieuwe waarde heeft in de kolom 'last change': dan is er iets veranderd in een van de kolommen. Het is dan wel handig om iets toe te voegen aan deze rijen dat ze al eerder in de sheets hebben gestaan, ik zal nog even bedenken wat handig is. Ik verwacht dat dit weinig voorkomt en/of weinig impact heeft.
-Maak een nieuw excel-bestand met de datum van de export in de naam, bv TNW_12_11_2024.xlsx. Deze heeft meerdere sheets.
+Maak een nieuw excel-bestand met de datum van de export in de naam, bv TNW_12_11_2024.xlsx. Deze heeft 2 sheets.
 Sheet 1 bevat alle items met alleen de essentiele kolommen voor de checks. Dat zijn:
 eerst: url, workflow_status, manual classification, scope, remarks
 dit zijn de 'interactieve' velden: de faculteit kan/moet hier dingen invullen, en de url is natuurlijk het meest belangrijk om het item te openen.
 dan: ml prediction, material id, title, owner, author, department, course name
 Dit zijn de belangrijkste gegevens die helpen een besluit te nemen.
-Sheet 2 bevat alle kolommen voor alle items. Dit kan gebruikt worden als naslag. Deze sheet staat op 'alleen-lezen' zodat altijd duidelijk is wat het start-punt was.
-Sheet 3 bevat wat lijstjes met mogelijkheden voor verschillende velden zoals 'workflow status', 'manual classification', en 'scope', zodat in die kolommen alleen die specifieke waardes ingevuld kunnen worden.
+Sheet 2 bevat alle kolommen voor alle items. Dit kan gebruikt worden als naslag.
 Evt: sheet met overzichten/statistieken, maar dat kunnen we beter los houden hiervan denk ik.
 De faculteit heeft automatisch toegang tot de sheets, en kan aan de slag.
 Wij kunnen in feite op ieder moment weer de data uitlezen uit deze sheets. Daar is een tweede scriptje voor die door alle beschikbare faculteits-sheets loopt en alle 'done' gemarkeerde items overneemt, de kolomnamen weer terugvertaalt naar de originelen, en de data vluchtig valideert (bv: de manuele classificatie moet altijd correct ingevuld zijn).

@@ -40,9 +40,16 @@ class Directory:
     @property
     def files(self) -> list['File']:
         '''
-        Returns all files in the dir as a list of File objects.
+        Gets all files in the dir as a list of File objects.
         '''
         return [File(self.full / file) for file in self.full.iterdir() if file.is_file()]
+
+    @property
+    def files_r(self) -> list['File']:
+        '''
+        Recursively gets all files in the dir, so including files in subdirs, as a list of File objects.
+        '''
+        return [File(self.full / file) for file in self.full.rglob('*') if file.is_file()]
 
     @property
     def dirs(self, r: bool = False) -> list['Directory']:
@@ -54,6 +61,21 @@ class Directory:
             return [Directory(self, d) for d in self.full.iterdir() if d.is_dir()]
         if r:
             return [Directory(self, d) for d in self.full.rglob('*') if d.is_dir()]
+    @property
+    def newest_file(self) -> 'File':
+        '''
+        Returns the newest file in the dir as a File object.
+        '''
+        all_files = self.files
+        return max(all_files, key=lambda x: x.created())
+
+    @property
+    def newest_file_r(self) -> str:
+        '''
+        Recursively gets the newest file in the dir, so including files in subdirs, as a File object.
+        '''
+        all_files = self.files_r
+        return max(all_files, key=lambda x: x.created())
 
     @property
     def exists(self) -> bool:
@@ -68,6 +90,7 @@ class Directory:
             self.full.mkdir(parents=True, exist_ok=False)
         except FileExistsError:
             pass
+
 
     def __eq__(self, other) -> bool:
         return self.full == other.full
@@ -120,20 +143,27 @@ class File:
     @property
     def path(self) -> pathlib.Path:
         return self._path
-    
+
     @property
     def name(self) -> str:
         return self._name
-    
+
     @property
     def extension(self) -> str:
         return self._extension
-    
+
     @property
     def dir(self) -> Directory:
         return self._dir
-    
-    
+
+    @property
+    def created(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self._path.stat().st_birthtime)
+
+    @property
+    def modified(self) -> datetime.datetime:
+        return datetime.datetime.fromtimestamp(self._path.stat().st_mtime)
+
     def copy(self, new_path: str) -> 'File':
         shutil.copy(self._path, new_path)
         return File(new_path)
@@ -146,11 +176,7 @@ class File:
         self._path = self._dir.full / new_name
         return File(self._path)
 
-    def created(self) -> datetime.datetime:
-        return datetime.datetime.fromtimestamp(self._path.stat().st_birthtime)
 
-    def modified(self) -> datetime.datetime:
-        return datetime.datetime.fromtimestamp(self._path.stat().st_mtime)
 
     def __eq__(self, other) -> bool:
         return self._path == other.path
